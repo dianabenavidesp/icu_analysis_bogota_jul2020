@@ -120,69 +120,79 @@ ggplot(bogota_all_data[bogota_all_data$Ubicacion %in% c("Hospital", "Hospital UC
 
 
 ########PART II. Build estimation model##########
-#train holt method of exponential smoothing
-days_train <- 82
-days_forecast <- 28
-
-f_holt <- holt(bogota_all_data$number[bogota_all_data$Ubicacion == "Hospital UCI"][1:days_train], exponential = TRUE, h = days_forecast)
-fcast <- forecast(f_holt, h = days_forecast)
-summary(fcast)
-forecast_means <- as.numeric(fcast$mean)
-
-#final forecast data
-forecast_data <- data.frame(bogota_all_data[bogota_all_data$Ubicacion %in% c("Hospital UCI"), c("Date", "number")])
-forecast_data$forecast_number <- forecast_data$number
-
-for(i in 1:length(forecast_means))
+#function to build model and generate all results
+build_model <- function(bogota_all_data, days_train, days_forecast, exponential_flag)
 {
-  if(nrow(forecast_data) >= (days_train + i))
+  f_holt <- holt(bogota_all_data$number[bogota_all_data$Ubicacion == "Hospital UCI"][1:days_train], exponential = exponential_flag, h = days_forecast)
+  fcast <- forecast(f_holt, h = days_forecast)
+  forecast_means <- as.numeric(fcast$mean)
+  write.table(summary(fcast), file = paste0("forecast_model_exp", exponential_flag, ".txt"))
+  
+  #final forecast data
+  forecast_data <- data.frame(bogota_all_data[bogota_all_data$Ubicacion %in% c("Hospital UCI"), c("Date", "number")])
+  forecast_data$forecast_number <- forecast_data$number
+  
+  for(i in 1:length(forecast_means))
   {
-    forecast_data$forecast_number[days_train + i] <- forecast_means[i]
-  }
-  else
-  {
-    forecast_data <- rbind(forecast_data, data.frame(Date = max(forecast_data$Date) + 1, 
-                                                     number = forecast_means[i], 
-                                                     forecast_number = forecast_means[i]))
+    if(nrow(forecast_data) >= (days_train + i))
+    {
+      forecast_data$forecast_number[days_train + i] <- forecast_means[i]
+    }
+    else
+    {
+      forecast_data <- rbind(forecast_data, data.frame(Date = max(forecast_data$Date) + 1, 
+                                                       number = forecast_means[i], 
+                                                       forecast_number = forecast_means[i]))
+    }
+    
   }
   
+  forecast_data <- forecast_data %>% mutate(predicted_actual = ifelse(Date <= "2020-07-06", "actual", "predicted"))
+  colors <- c("actual" = "orange", "predicted" = "red")
+  
+  
+  #calculate percentages of ocuppation
+  number_beds <- c(1039, 1200, 1400, 1600, 1800, 2000)
+  
+  occupation_beds_1 <- forecast_data %>% mutate(number_beds = number_beds[1], percentage_occupation = forecast_number / number_beds[1])
+  occupation_beds_2 <- forecast_data %>% mutate(number_beds = number_beds[2], percentage_occupation = forecast_number / number_beds[2])
+  occupation_beds_3 <- forecast_data %>% mutate(number_beds = number_beds[3], percentage_occupation = forecast_number / number_beds[3])
+  occupation_beds_4 <- forecast_data %>% mutate(number_beds = number_beds[4], percentage_occupation = forecast_number / number_beds[4])
+  occupation_beds_5 <- forecast_data %>% mutate(number_beds = number_beds[5], percentage_occupation = forecast_number / number_beds[5])
+  occupation_beds_6 <- forecast_data %>% mutate(number_beds = number_beds[6], percentage_occupation = forecast_number / number_beds[6])
+  
+  ocuppation_forecast_final <- rbind(occupation_beds_1, occupation_beds_2, occupation_beds_3, occupation_beds_4, occupation_beds_5, occupation_beds_6)
+  ocuppation_forecast_final$number_beds <- paste0(as.character(ocuppation_forecast_final$number_beds), " Camas UCI")
+  write.csv(ocuppation_forecast_final, file = paste0("forecast_table_exp", exponential_flag, ".csv"))
+  
+  #plot
+  plot <- ggplot(ocuppation_forecast_final, 
+         aes(x = Date, y = percentage_occupation * 100, fill = predicted_actual)) + 
+    geom_bar(stat = "identity", position="stack") + 
+    facet_rep_wrap(~ number_beds, ncol = 2, , scales='fixed', repeat.tick.labels = TRUE) + 
+    geom_hline(yintercept = 100, size = 1) + 
+    xlab("Fecha") + 
+    ylab("Porcentaje Ocupación UCI (%)") + 
+    theme_bw() + 
+    theme(axis.text.x = element_text(angle = 90, size = 16),
+          axis.text.y = element_text(size = 16),
+          axis.title.x = element_text(size = 18),
+          axis.title.y = element_text(size = 18),
+          legend.position = "none", 
+          strip.text.x = element_text(size = 18)) + 
+    scale_x_date(date_labels="%d/%m", date_breaks ="4 days", expand = c(0, 0), 
+                 limits = c(min(ocuppation_forecast_final$Date), 
+                            max(ocuppation_forecast_final$Date))) + 
+    scale_fill_manual(values = c("orange", "red"))
+  
+  ggsave(plot, file = paste0("forecast_plot_exp", exponential_flag, ".pdf"), width = 28, height = 16, limitsize = FALSE)
 }
 
-forecast_data <- forecast_data %>% mutate(predicted_actual = ifelse(Date <= "2020-07-06", "actual", "predicted"))
-colors <- c("actual" = "orange", "predicted" = "red")
+#train holt method of exponential smoothing
+days_train <- 82
+days_forecast <- 52
+exponential_flag <- FALSE
 
-
-#calculate percentages of ocuppation
-number_beds <- c(1039, 1200, 1400, 1600, 1800, 2000)
-
-occupation_beds_1 <- forecast_data %>% mutate(number_beds = number_beds[1], percentage_occupation = forecast_number / number_beds[1])
-occupation_beds_2 <- forecast_data %>% mutate(number_beds = number_beds[2], percentage_occupation = forecast_number / number_beds[2])
-occupation_beds_3 <- forecast_data %>% mutate(number_beds = number_beds[3], percentage_occupation = forecast_number / number_beds[3])
-occupation_beds_4 <- forecast_data %>% mutate(number_beds = number_beds[4], percentage_occupation = forecast_number / number_beds[4])
-occupation_beds_5 <- forecast_data %>% mutate(number_beds = number_beds[5], percentage_occupation = forecast_number / number_beds[5])
-occupation_beds_6 <- forecast_data %>% mutate(number_beds = number_beds[6], percentage_occupation = forecast_number / number_beds[6])
-
-ocuppation_forecast_final <- rbind(occupation_beds_1, occupation_beds_2, occupation_beds_3, occupation_beds_4, occupation_beds_5, occupation_beds_6)
-ocuppation_forecast_final$number_beds <- paste0(as.character(ocuppation_forecast_final$number_beds), " Camas UCI")
-
-
-#plot
-ggplot(ocuppation_forecast_final, 
-       aes(x = Date, y = percentage_occupation * 100, fill = predicted_actual)) + 
-  geom_bar(stat = "identity", position="stack") + 
-  facet_rep_wrap(~ number_beds, ncol = 2, , scales='fixed', repeat.tick.labels = TRUE) + 
-  geom_hline(yintercept = 100, size = 1) + 
-  xlab("Fecha") + 
-  ylab("Porcentaje Ocupación UCI (%)") + 
-  theme_bw() + 
-  theme(axis.text.x = element_text(angle = 20, size = 12),
-        axis.text.y = element_text(size = 12),
-        axis.title.x = element_text(size = 14),
-        axis.title.y = element_text(size = 14),
-        legend.position = "none", 
-        strip.text.x = element_text(size = 12)) + 
-  scale_x_date(date_labels="%d/%m", date_breaks ="4 days", expand = c(0, 0), 
-               limits = c(min(ocuppation_forecast_final$Date), 
-                          max(ocuppation_forecast_final$Date))) + 
-  scale_fill_manual(values = c("orange", "red"))
+#forecast_pessimistic
+build_model(bogota_all_data, days_train, days_forecast, exponential_flag)
 
